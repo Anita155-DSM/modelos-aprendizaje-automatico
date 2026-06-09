@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TP MediaPipe - Selfie Segmentation</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation"></script>
+
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #2c3e50;
+            color: white;
+            margin-top: 2rem;
+        }
+        h1 { margin-bottom: 5px; }
+        #status { color: #f1c40f; font-weight: bold; margin-bottom: 20px; }
+        
+        /* El video original está oculto porque solo queremos ver el resultado procesado */
+        video { display: none; }
+        
+        /* El lienzo donde se dibuja el resultado */
+        canvas {
+            border: 4px solid #34495e;
+            border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+            background-color: #000;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>MediaPipe Selfie Segmentation</h1>
+    <p id="status">Cargando el modelo y solicitando permisos de cámara...</p>
+
+    <video id="webcam" autoplay playsinline width="640" height="480"></video>
+    
+    <canvas id="output" width="640" height="480"></canvas>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('output');
+        const statusText = document.getElementById('status');
+
+        // Función para encender la cámara web
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480 }
+            });
+            video.srcObject = stream;
+
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    resolve(video);
+                };
+            });
+        }
+
+        // Función principal que inicializa todo
+        async function main() {
+            // 1. Iniciar la cámara
+            await setupCamera();
+            video.play();
+
+            // 2. Configurar y cargar el modelo de MediaPipe
+            const model = bodySegmentation.SupportedModels.MediaPipeSelfieSegmentation;
+            const segmenterConfig = {
+              runtime: 'tfjs', // Usamos TensorFlow.js como motor
+            };
+            const segmenter = await bodySegmentation.createSegmenter(model, segmenterConfig);
+
+            statusText.innerText = "¡Modelo funcionando! Reemplazando el fondo por verde...";
+            statusText.style.color = "#2ecc71";
+
+            // 3. Función para procesar cuadro por cuadro en tiempo real
+            async function procesarFrame() {
+                // Generar la segmentación de la persona
+                const segmentation = await segmenter.segmentPeople(video);
+
+                // Configurar los colores:
+                // foregroundColor (la persona): transparente para dejar ver el video real
+                const foregroundColor = {r: 0, g: 0, b: 0, a: 0}; 
+                // backgroundColor (el fondo): lo pintamos de un verde brillante (estilo Chroma)
+                const backgroundColor = {r: 0, g: 255, b: 0, a: 255}; 
+
+                // Crear la máscara que separa a la persona del fondo
+                const mask = await bodySegmentation.toBinaryMask(segmentation, foregroundColor, backgroundColor);
+
+                // Dibujar el resultado final en el canvas
+                const opacity = 1;
+                const maskBlurAmount = 3; // Un pequeño difuminado en los bordes para que sea más realista
+                const flipHorizontal = false;
+
+                await bodySegmentation.drawMask(canvas, video, mask, opacity, maskBlurAmount, flipHorizontal);
+
+                // Volver a ejecutar esta función para el siguiente cuadro de video
+                requestAnimationFrame(procesarFrame);
+            }
+
+            // Iniciar el bucle de procesamiento
+            procesarFrame();
+        }
+
+        // Ejecutar la aplicación
+        main();
+    </script>
+</body>
+</html>
