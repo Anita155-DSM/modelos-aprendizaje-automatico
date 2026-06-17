@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEGM_SYS :: MediaPipe v2.0</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --green: #00ff41;
+            --green-dim: #00aa2a;
+            --green-dark: #003311;
+            --amber: #ffb700;
+            --red: #ff2244;
+            --bg: #020d06;
+            --panel: #050f07;
+            --border: #00ff4133;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--green);
+            font-family: 'Share Tech Mono', monospace;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem 1rem;
+            overflow-x: hidden;
+        }
+
+        /* Subtle scanline overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.07) 2px,
+                rgba(0, 0, 0, 0.07) 4px
+            );
+            pointer-events: none;
+            z-index: 999;
+        }
+
+        /* Header */
+        .header {
+            width: 100%;
+            max-width: 680px;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 1rem;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .sys-title {
+            font-family: 'Orbitron', monospace;
+            font-size: 1.2rem;
+            font-weight: 700;
+            letter-spacing: 0.15em;
+            color: var(--green);
+            text-shadow: 0 0 12px rgba(0,255,65,0.4);
+        }
+
+        .sys-title span {
+            color: var(--green-dim);
+            font-weight: 400;
+        }
+
+        .badges {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            font-size: 0.65rem;
+            letter-spacing: 0.1em;
+            padding: 2px 8px;
+            border: 1px solid;
+            border-radius: 2px;
+        }
+
+        .badge-green { border-color: var(--green); color: var(--green); }
+        .badge-amber { border-color: var(--amber); color: var(--amber); }
+
+        .header-meta {
+            margin-top: 0.75rem;
+            font-size: 0.7rem;
+            color: var(--green-dim);
+            letter-spacing: 0.05em;
+        }
+
+        .header-meta span { color: var(--green); }
+
+        /* Main canvas area */
+        .viewport-wrapper {
+            position: relative;
+            width: 640px;
+            max-width: 100%;
+        }
+
+        /* Corner decorations */
+        .corner {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            z-index: 10;
+        }
+        .corner-tl { top: -1px; left: -1px; border-top: 2px solid var(--green); border-left: 2px solid var(--green); }
+        .corner-tr { top: -1px; right: -1px; border-top: 2px solid var(--green); border-right: 2px solid var(--green); }
+        .corner-bl { bottom: -1px; left: -1px; border-bottom: 2px solid var(--green); border-left: 2px solid var(--green); }
+        .corner-br { bottom: -1px; right: -1px; border-bottom: 2px solid var(--green); border-right: 2px solid var(--green); }
+
+        video { display: none; }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            background: #000;
+        }
+
+        /* HUD overlays on the canvas */
+        .hud-top {
+            position: absolute;
+            top: 8px;
+            left: 12px;
+            right: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.65rem;
+            letter-spacing: 0.08em;
+            color: var(--green-dim);
+            pointer-events: none;
+        }
+
+        .hud-bottom {
+            position: absolute;
+            bottom: 8px;
+            left: 12px;
+            right: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.65rem;
+            letter-spacing: 0.08em;
+            color: var(--green-dim);
+            pointer-events: none;
+        }
+
+        .hud-live {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            color: var(--red);
+        }
+
+        .hud-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--red);
+            animation: blink 1.2s step-end infinite;
+        }
+
+        /* Status panel */
+        .status-panel {
+            width: 100%;
+            max-width: 680px;
+            margin-top: 1.25rem;
+            border: 1px solid var(--border);
+            background: var(--panel);
+            border-radius: 2px;
+            padding: 0.75rem 1rem;
+        }
+
+        .status-line {
+            font-size: 0.72rem;
+            letter-spacing: 0.04em;
+            line-height: 1.8;
+            color: var(--green-dim);
+        }
+
+        .status-line .prefix { color: var(--green); }
+        .status-line .val { color: var(--amber); }
+        .status-line .ok { color: var(--green); }
+        .status-line .err { color: var(--red); }
+
+        #status-msg {
+            color: var(--green-dim);
+            transition: color 0.3s;
+        }
+
+        #status-msg.ready { color: var(--green); }
+
+        /* Info grid */
+        .info-grid {
+            width: 100%;
+            max-width: 680px;
+            margin-top: 1rem;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.75rem;
+        }
+
+        .info-cell {
+            border: 1px solid var(--border);
+            background: var(--panel);
+            padding: 0.6rem 0.75rem;
+            border-radius: 2px;
+        }
+
+        .info-label {
+            font-size: 0.6rem;
+            letter-spacing: 0.12em;
+            color: var(--green-dim);
+            text-transform: uppercase;
+            margin-bottom: 2px;
+        }
+
+        .info-value {
+            font-size: 0.85rem;
+            color: var(--green);
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        /* BG Upload panel */
+        .bg-panel {
+            width: 100%;
+            max-width: 680px;
+            margin-top: 1rem;
+            border: 1px solid var(--border);
+            background: var(--panel);
+            border-radius: 2px;
+            padding: 0.75rem 1rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .bg-label {
+            font-size: 0.65rem;
+            letter-spacing: 0.1em;
+            color: var(--green-dim);
+            white-space: nowrap;
+        }
+
+        .bg-label span { color: var(--green); }
+
+        .btn-upload {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.7rem;
+            letter-spacing: 0.1em;
+            background: transparent;
+            color: var(--green);
+            border: 1px solid var(--green);
+            padding: 4px 14px;
+            cursor: pointer;
+            border-radius: 2px;
+            transition: background 0.15s, color 0.15s;
+        }
+        .btn-upload:hover { background: var(--green); color: #000; }
+
+        .btn-reset {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.7rem;
+            letter-spacing: 0.1em;
+            background: transparent;
+            color: var(--red);
+            border: 1px solid var(--red);
+            padding: 4px 14px;
+            cursor: pointer;
+            border-radius: 2px;
+            transition: background 0.15s, color 0.15s;
+            display: none;
+        }
+        .btn-reset:hover { background: var(--red); color: #000; }
+
+        .bg-filename {
+            font-size: 0.65rem;
+            color: var(--amber);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 200px;
+        }
+
+        #bg-file-input { display: none; }
+
+        .bg-thumb {
+            width: 48px;
+            height: 32px;
+            object-fit: cover;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            display: none;
+        }
+
+        @media (max-width: 660px) {
+            .viewport-wrapper { width: 100%; }
+            .info-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="header-top">
+            <div class="sys-title">SEGM<span>_</span>SYS <span>:: MediaPipe v2.0</span></div>
+            <div class="badges">
+                <span class="badge badge-green">TFJS</span>
+                <span class="badge badge-amber">WebGL</span>
+                <span class="badge badge-green">640×480</span>
+            </div>
+        </div>
+        <div class="header-meta">
+            MODULE: <span>body-segmentation</span> &nbsp;|&nbsp;
+            RUNTIME: <span>tfjs</span> &nbsp;|&nbsp;
+            BACKEND: <span>webgl</span> &nbsp;|&nbsp;
+            KEY: <span id="hdr-key">FG=transparent / BG=chroma-green</span>
+        </div>
+    </div>
+
+    <div class="viewport-wrapper">
+        <div class="corner corner-tl"></div>
+        <div class="corner corner-tr"></div>
+        <div class="corner corner-bl"></div>
+        <div class="corner corner-br"></div>
+
+        <div class="hud-top">
+            <span>CAM_0 :: LIVE</span>
+            <span id="hud-time">--:--:--</span>
+        </div>
+
+        <video id="webcam" autoplay playsinline width="640" height="480"></video>
+        <canvas id="output" width="640" height="480"></canvas>
+
+        <div class="hud-bottom">
+            <div class="hud-live">
+                <div class="hud-dot"></div>
+                REC
+            </div>
+            <span id="hud-fps">-- FPS</span>
+        </div>
+    </div>
+
+    <div class="status-panel">
+        <div class="status-line">
+            <span class="prefix">[SYS]</span> &gt; <span id="status-msg">Inicializando módulos... cargando modelo y solicitando acceso a cámara</span>
+        </div>
+        <div class="status-line" id="extra-line" style="display:none">
+            <span class="prefix">[INF]</span> &gt; blur_kernel=<span class="val">3px</span> &nbsp; opacity=<span class="val">1.0</span> &nbsp; flip=<span class="val">false</span> &nbsp; bg_color=<span class="val">rgb(0,255,0)</span>
+        </div>
+    </div>
+
+    <div class="info-grid">
+        <div class="info-cell">
+            <div class="info-label">MODEL</div>
+            <div class="info-value" id="inf-model">loading...</div>
+        </div>
+        <div class="info-cell">
+            <div class="info-label">RESOLUTION</div>
+            <div class="info-value">640 × 480</div>
+        </div>
+        <div class="info-cell">
+            <div class="info-label">STATUS</div>
+            <div class="info-value" id="inf-status" style="color: var(--amber)">INIT</div>
+        </div>
+    </div>
+
+    <div class="bg-panel">
+        <span class="bg-label"><span>[BG]</span> BACKGROUND_SRC:</span>
+        <button class="btn-upload" id="btn-upload">+ ADJUNTAR FONDO</button>
+        <button class="btn-reset" id="btn-reset">✕ RESET</button>
+        <img class="bg-thumb" id="bg-thumb" alt="bg preview" />
+        <span class="bg-filename" id="bg-filename">chroma_green :: default</span>
+        <input type="file" id="bg-file-input" accept="image/*" />
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('output');
+        const statusMsg = document.getElementById('status-msg');
+        const infModel = document.getElementById('inf-model');
+        const infStatus = document.getElementById('inf-status');
+        const hudFps = document.getElementById('hud-fps');
+        const hudTime = document.getElementById('hud-time');
+        const extraLine = document.getElementById('extra-line');
+
+        let lastFrameTime = performance.now();
+        let frameCount = 0;
+        let fps = 0;
+        let bgImage = null; // null = usar verde, Image() = usar imagen cargada
+
+        // Upload handlers
+        document.getElementById('btn-upload').addEventListener('click', () => {
+            document.getElementById('bg-file-input').click();
+        });
+
+        document.getElementById('bg-file-input').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+            img.onload = () => {
+                bgImage = img;
+                document.getElementById('bg-filename').textContent = file.name;
+                document.getElementById('bg-thumb').src = url;
+                document.getElementById('bg-thumb').style.display = 'block';
+                document.getElementById('btn-reset').style.display = 'inline-block';
+                document.getElementById('hdr-key').textContent = 'FG=transparent / BG=image:' + file.name;
+                statusMsg.textContent = 'Fondo actualizado: ' + file.name;
+            };
+            img.src = url;
+        });
+
+        document.getElementById('btn-reset').addEventListener('click', () => {
+            bgImage = null;
+            document.getElementById('bg-filename').textContent = 'chroma_green :: default';
+            document.getElementById('bg-thumb').style.display = 'none';
+            document.getElementById('bg-thumb').src = '';
+            document.getElementById('btn-reset').style.display = 'none';
+            document.getElementById('hdr-key').textContent = 'FG=transparent / BG=chroma-green';
+            document.getElementById('bg-file-input').value = '';
+            statusMsg.textContent = 'Fondo restablecido a chroma-green.';
+        });
+
+        function updateClock() {
+            const now = new Date();
+            const h = String(now.getHours()).padStart(2,'0');
+            const m = String(now.getMinutes()).padStart(2,'0');
+            const s = String(now.getSeconds()).padStart(2,'0');
+            hudTime.textContent = `${h}:${m}:${s}`;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+            video.srcObject = stream;
+            return new Promise(resolve => { video.onloadedmetadata = () => resolve(video); });
+        }
+
+        async function main() {
+            await setupCamera();
+            video.play();
+
+            statusMsg.textContent = 'Cargando modelo MediaPipeSelfieSegmentation...';
+            infModel.textContent = 'LOADING...';
+
+            const model = bodySegmentation.SupportedModels.MediaPipeSelfieSegmentation;
+            const segmenter = await bodySegmentation.createSegmenter(model, { runtime: 'tfjs' });
+
+            statusMsg.textContent = 'Modelo activo. Segmentación en tiempo real — reemplazando fondo por verde.';
+            statusMsg.classList.add('ready');
+            infModel.textContent = 'MP_SELFIE_SEG';
+            infStatus.textContent = 'ACTIVE';
+            infStatus.style.color = 'var(--green)';
+            extraLine.style.display = 'block';
+
+            const foregroundColor = { r: 0, g: 0, b: 0, a: 0 };
+            const backgroundColor = { r: 0, g: 255, b: 0, a: 255 };
+
+            // Canvas offscreen reutilizables (se crean una sola vez)
+            const W = canvas.width, H = canvas.height;
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = W; maskCanvas.height = H;
+            const maskCtx = maskCanvas.getContext('2d');
+
+            const personCanvas = document.createElement('canvas');
+            personCanvas.width = W; personCanvas.height = H;
+            const personCtx = personCanvas.getContext('2d');
+
+            const TARGET_MS = 1000 / 15; // limitar a ~15 FPS para no saturar la GPU
+            let lastProcessTime = 0;
+            let running = false;
+
+            async function procesarFrame(timestamp) {
+                requestAnimationFrame(procesarFrame);
+
+                // Saltear frame si no pasaron los ms necesarios
+                if (timestamp - lastProcessTime < TARGET_MS) return;
+                // Saltear frame si el anterior todavía está procesando
+                if (running) return;
+
+                running = true;
+                lastProcessTime = timestamp;
+
+                try {
+                    const segmentation = await segmenter.segmentPeople(video);
+
+                    if (!bgImage) {
+                        // Modo verde: comportamiento original
+                        const mask = await bodySegmentation.toBinaryMask(segmentation, foregroundColor, backgroundColor);
+                        await bodySegmentation.drawMask(canvas, video, mask, 1, 3, false);
+                    } else {
+                        const ctx = canvas.getContext('2d');
+
+                        // 1. Obtener máscara: persona=alpha 255, fondo=alpha 0
+                        const maskFg = { r: 255, g: 255, b: 255, a: 255 };
+                        const maskBg = { r: 0,   g: 0,   b: 0,   a: 255 };
+                        const maskData = await bodySegmentation.toBinaryMask(segmentation, maskFg, maskBg);
+
+                        // 2. Convertir RGB de la máscara a canal alpha
+                        //    toBinaryMask devuelve pixels con R=255/0 pero alpha siempre 255,
+                        //    destination-in usa alpha, así que hay que mover R → A
+                        const px = maskData.data;
+                        for (let i = 0; i < px.length; i += 4) {
+                            px[i + 3] = px[i]; // alpha = valor del canal rojo (255 persona, 0 fondo)
+                        }
+                        maskCtx.putImageData(maskData, 0, 0);
+
+                        // 3. Dibujar frame del video en personCanvas
+                        personCtx.clearRect(0, 0, W, H);
+                        personCtx.drawImage(video, 0, 0, W, H);
+
+                        // 4. Recortar persona usando la máscara (destination-in mantiene solo donde alpha > 0)
+                        personCtx.globalCompositeOperation = 'destination-in';
+                        personCtx.drawImage(maskCanvas, 0, 0);
+                        personCtx.globalCompositeOperation = 'source-over';
+
+                        // 5. Componer final: imagen de fondo + persona recortada encima
+                        ctx.drawImage(bgImage, 0, 0, W, H);
+                        ctx.drawImage(personCanvas, 0, 0);
+                    }
+
+                    // Limpiar tensores de segmentación
+                    for (const seg of segmentation) {
+                        if (seg.mask && seg.mask.toTensor) {
+                            const t = seg.mask.toTensor();
+                            if (t && t.dispose) t.dispose();
+                        }
+                    }
+                } catch (e) {
+                    // silenciar errores de frame individual
+                } finally {
+                    running = false;
+                }
+
+                frameCount++;
+                const now = performance.now();
+                const delta = now - lastFrameTime;
+                if (delta >= 500) {
+                    fps = Math.round((frameCount / delta) * 1000);
+                    hudFps.textContent = `${fps} FPS`;
+                    frameCount = 0;
+                    lastFrameTime = now;
+                }
+            }
+
+            procesarFrame();
+        }
+
+        main();
+    </script>
+</body>
+</html>
